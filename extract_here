@@ -1,3 +1,0 @@
-#!/bin/bash
-unrar x "$0"
-# vim: set ft:sh:

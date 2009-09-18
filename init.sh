@@ -1,5 +1,5 @@
 #!/bin/sh
 nautilus&
-gnome-panel&
+xfce4-panel&
 fusion-icon
 
