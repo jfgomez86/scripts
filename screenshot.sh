@@ -1,2 +1,2 @@
 #!/bin/bash
-scrot -s -e 'rox $$(dirname $f)' -b
+scrot -s -e 'thunar $$(dirname $f)' -b
