@@ -1,0 +1,69 @@
+#!/usr/bin/env ruby
+# vim: set ft:ruby:
+
+# imageshack uploader
+# Author: Jose Felix Gomez
+require 'rubygems'
+require 'mechanize'
+require 'zerenity'
+
+class Uploader
+  POST_PATH    = "http://load.imageshack.us/"
+  INPUT_NAME   = "fileupload"
+  LINK_TEXT    = "link"
+  HREF_MATCHER = "imageshack"
+
+  attr_reader :link
+
+  def initialize(img_path)
+    @path = img_path
+    upload(@path)
+  end
+
+  protected
+
+  def upload(path)
+    raise "File doesn't exist" unless File.exists? path
+    @image = File.open(path)
+    response = send_file(@image, POST_PATH, INPUT_NAME)
+    return parse_response(response)
+  ensure
+    @image.close unless @image.nil? || @image.closed?
+  end
+
+  def send_file(file, receiver, name)
+    agent = WWW::Mechanize.new
+    return agent.post(receiver, name => file)
+  end
+
+  def parse_response(response)
+    @link = (response/'a').find do |l|
+      l.inner_text.match(/#{LINK_TEXT}/) &&
+        l.get_attribute('href').match(/#{HREF_MATCHER}/)
+    end
+    @link = @link.get_attribute("href") if @link
+    return @link if @link
+    return false
+  end
+end
+
+def valid_photo?(file)
+  valid_types = %w{.jpg .png .jpeg .gif .bmp}
+  return true if valid_types.include? File.extname(file)
+  return false
+end
+
+if __FILE__ == $0
+  begin
+    if ARGV[0] && File.exists?(ARGV[0]) && valid_photo?(ARGV[0])
+      upload = Uploader.new(ARGV[0])
+      Zerenity::Info(:text => "The image was successfully uploaded to
+                     Imageschack:\n#{upload.link}")
+    else
+      raise "Didn't specify a valid picture"
+    end
+  rescue => e
+    Zerenity::Error(:text => "An error ocurred:\n#{e.message}\nBacktrace:
+                    #{e.backtrace.join('\n')}")
+  end
+end

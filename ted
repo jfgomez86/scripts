@@ -1,0 +1,2 @@
+#!/bin/bash 
+cd /home/josesito/system/opt/ted/ && java -jar ted.jar

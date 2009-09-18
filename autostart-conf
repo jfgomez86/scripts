@@ -1,0 +1,269 @@
+#!/usr/bin/env ruby
+require 'ftools'
+require 'optparse'
+require 'ostruct'
+require 'rubygems'
+require 'ruby-debug'
+
+class AutostartConfiguration
+  CONFIG = {
+    :autostart_file => "/home/josesito/.autostart",
+    :result_separator => "\n",
+    :message => "The following applications will start on login:\n",
+    :shebang => "#!/bin/bash"
+  }
+
+  def initialize(options = {})
+    @current_applications, @inactive_applications = read_current_applications
+    case
+    when options.include?(:add_app)
+      add_app(options[:add_app])
+    when options.include?(:enable_app)
+      enable_app(options[:enable_app])
+    when options.include?(:rm_app)
+      rm_app(options[:rm_app])
+    when options.include?(:disable_app)
+      disable_app(options[:disable_app])
+    when options.include?(:show_status)
+      print_status
+    else
+      @message = "Select Autostart Applications:"
+      create_zenity_checklist
+    end
+  end
+
+  def add_app(application)
+    #Get only the word before first space and check if it exists with 'which'
+    app_name = application.gsub(/^(\w+)\s*.*$/, "\\1")
+    if application_exists?(app_name)
+      if application_inactive?(app_name)
+        enable_app(application)
+      elsif application_current?(app_name)
+        puts "The application #{application} is already enabled"
+        exit
+      else
+        @current_applications.push(application)
+        make_autostart(@current_applications, @inactive_applications)
+      end
+    else
+      puts "The application #{app_name} doesn't seem to exist."
+      puts "Please check it is somewhere in your PATH and it's executable"
+      exit
+    end
+  end
+
+  def rm_app(application)
+    #Get only the word before first space and check if it exists with 'which'
+    app_name = application.gsub(/^(\w+)\s*.*$/, "\\1")
+    if application_current? application
+      @current_applications -= [ $~[0] ]
+      make_autostart(@current_applications, @inactive_applications)
+    elsif application_inactive? application
+      @inactive_applications -= [ $~[0] ]
+      make_autostart(@current_applications, @inactive_applications)
+    else
+      puts "I can't find #{application} in the current autostarted apps."
+      exit
+    end
+  end
+
+  def enable_app(application)
+    #Match everything containing #{application}
+    if @inactive_applications.find { |app| app.match(/^.*#{application}.*$/) }
+      @inactive_applications -= [ $~[0] ]
+      @current_applications.push($~[0])
+      make_autostart(@current_applications, @inactive_applications)
+    elsif application_current? application
+      puts "The application #{application} is already enabled"
+      exit
+    else
+      puts "I can't find #{application} in the current autostarted apps."
+      exit
+    end
+  end
+
+  def disable_app(application)
+    #Match everything containing #{application}
+    if @current_applications.find { |app| app.match(/^.*#{application}.*$/) }
+      @current_applications-= [ $~[0] ]
+      @inactive_applications.push($~[0])
+      make_autostart(@current_applications, @inactive_applications)
+    elsif application_inactive? application
+      puts "Application #{application} is already disabled"
+      exit
+    else
+      puts "I can't find #{application} in the current autostarted apps."
+      exit
+    end
+  end
+
+  def create_zenity_checklist
+    get_choices
+    cmd = make_cmd
+    output = run cmd
+    process_output(output)
+  end
+
+  private
+
+
+  def application_inactive?(application)
+    @inactive_applications.find { |app| app.match(/^.*#{application}.*$/) }
+  end
+
+  def application_current?(application)
+    @current_applications.find { |app| app.match(/^.*#{application}.*$/) }
+  end
+
+  def get_choices
+    @choices = create_choices(@current_applications, @inactive_applications)
+  end
+
+  # Reads CONFIG[:autostart_file] returning an array
+  def read_current_applications
+    current_applications  = []
+    inactive_applications = []
+    File.readlines(CONFIG[:autostart_file]).each do |line|
+      # Ignore the shebang and commented applications
+      unless line.match(/^#/)
+        current_applications << line.gsub(/\s*&/, "").chomp.squeeze(" ")
+      else
+        # Lets also return the inactive applications but no comments
+        unless line.match(/^#!/)
+          if line.match(/^#(.*)\s*&$/)
+            # Store the first substring of last match:
+            inactive_applications << $~[1].squeeze(" ").strip
+          end
+        end
+      end
+    end
+    return current_applications, inactive_applications
+  end
+
+  def create_choices(applications, inactive_applications)
+    choices = []
+    applications.each do |app|
+      choices << "TRUE '#{app}'"
+    end
+    inactive_applications.each do |app|
+      choices << "FALSE '#{app}'"
+    end
+    choices
+  end
+
+  def make_cmd
+    cmd  = "zenity  --list  --text '#{CONFIG[:message]}' --checklist "
+    cmd += "--column 'Active' --column 'Application' "
+    cmd += "#{@choices.join(' ')} --separator='#{CONFIG[:result_separator]}'"
+  end
+
+  def run(cmd)
+    %x[#{cmd}]
+  end
+
+  def application_exists?(application)
+    return system("which #{application}")
+  end
+
+  def process_output(out)
+    unless out.empty?
+      new_active = out.split("\n")
+      new_inactive = @current_applications - new_active
+      @current_applications = new_active
+      @inactive_applications << new_inactive
+      make_autostart(new_active, new_inactive)
+    else
+      puts "Operation Cancelled"
+    end
+  end
+
+  def make_autostart(active, inactive)
+    make_backup(CONFIG[:autostart_file])
+    File.open(CONFIG[:autostart_file], "w") do |file|
+      file.puts(CONFIG[:shebang])
+      file.puts "# Updated at: #{Time.now}"
+      file.puts "# INACTIVE-APPLICATIONS:"
+      inactive.each do |app|
+        file.puts "##{app} &"
+      end
+      file.puts "# ACTIVE-APPLICATIONS:"
+      active.each do |app|
+        file.puts "#{app} &"
+      end
+    end
+    puts "Done"
+    print_status
+  end
+
+  def print_status
+    puts "Enabled:"
+    puts @current_applications
+    puts "\nDisabled:"
+    puts @inactive_applications
+  end
+
+  def make_backup(file)
+    File.cp(file, "#{file}.old")
+  end
+end
+
+if $0 == __FILE__
+  unless ARGV.empty?
+
+    options = OpenStruct.new
+
+    OptionParser.new do |opts|
+      options.add_app     = false
+      options.rm_app      = false
+      options.enable_app  = false
+      options.disable_app = false
+      options.show_status = false
+
+      opts.on("-a", "--add-application APP", "Add APP to the autorun queue") do |a|
+        options.add_app = a
+      end
+
+      opts.on("-r", "--rm-application APP", "Remove APP from the autorun queue") do |r|
+        options.rm_app = r
+      end
+
+      opts.on("-e", "--enable-application APP", "Enable APP from the autorun queue") do |e|
+        options.enable_app = e
+      end
+
+      opts.on("-d", "--disable-application APP", "Enable APP from the autorun queue") do |d|
+        options.disable_app = d
+      end
+
+      opts.on("-s", "--status", "Show current autostart status") do |s|
+        options.show_status = true
+      end
+
+      opts.on_tail("-h", "--help", "Show this message") do
+        puts opts
+        exit
+      end
+
+    end.parse!
+
+    args = case
+           when options.add_app
+             { :add_app => options.add_app }
+           when options.rm_app
+             {:rm_app => options.rm_app}
+           when options.enable_app
+             {:enable_app => options.enable_app}
+           when options.disable_app
+             {:disable_app => options.disable_app}
+           when options.show_status
+             {:show_status => options.show_status}
+           else
+             puts "Unknown argument. Run #{__FILE__} -h for more information."
+             exit
+           end
+    app = AutostartConfiguration.new(args)
+  else
+    app = AutostartConfiguration.new
+  end
+end
+# vim: set ft:ruby:

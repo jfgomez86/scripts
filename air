@@ -1,0 +1,33 @@
+#!/usr/bin/env ruby
+require 'yaml'
+
+class Air
+  def initialize(app_name)
+    @app_name = [app_name, ".air"].join
+    load_config
+    find_file
+    run
+  end
+
+  def load_config 
+    if File.exists?(File.expand_path(File.join("~", ".airrc")))
+      config = YAML.load_file(File.expand_path(File.join("~", ".airrc"))) 
+      @air_apps_dir = config[:air_apps_dir] || "/opt/air_apps"
+    end
+  end
+
+  def find_file
+    if File.exists? File.join(@air_apps_dir, @app_name)
+      system(['adobe-air', File.join(@air_apps_dir, @app_name)].join(" "))
+      exit(0)
+    else
+      raise RuntimeError, "Can't find file #{@app_name} in #{@air_apps_dir}"
+    end
+  end
+end
+
+begin
+  Air.new ARGV[0]
+rescue RuntimeError => e
+  puts "ERROR: #{e.message}"
+end
